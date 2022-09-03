@@ -141,3 +141,28 @@ fn transfer_claim_failed_when_not_claim_owner() {
 	})
 }
 
+#[test]
+fn transfer_claim_failed_when_claim_not_exist() {
+	// transfer claim Error ClaimNotExist
+	new_test_ext().execute_with(|| {
+		let claim = vec![0, 1];
+		let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
+
+		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+
+		assert_eq!(
+			Proofs::<Test>::get(&bounded_claim),
+			Some((1, frame_system::Pallet::<Test>::block_number()))
+		);
+
+
+		let claim2 = vec![0, 2];
+
+		assert_noop!(
+			PoeModule::transfer_claim(Origin::signed(2), 3, claim2.clone()),
+			Error::<Test>::ClaimNotExist
+		);
+
+	})
+}
+
