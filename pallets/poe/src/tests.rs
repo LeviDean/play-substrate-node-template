@@ -1,6 +1,18 @@
 use super::*;
 use crate::{mock::*, Error};
 use frame_support::{assert_noop, assert_ok, BoundedVec};
+use frame_support::pallet_prelude::Get;
+
+#[test]
+fn get_length() {
+	// create claim OK
+	new_test_ext().execute_with(|| {
+		assert_eq!(
+			<<Test as Config>::MaxClaimLength as Get<u32>>::get(),
+			512
+		);
+	})
+}
 
 #[test]
 fn create_claim_works() {
