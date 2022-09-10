@@ -1,3 +1,6 @@
+# 0. 代码执行
+![](./img/run.jpg)
+
 # 1. 为 Alice 创建两只 Kitty 后，查询一些结果
 ![](./img/aliceKitties.jpg)
 第一项是 Alice 拥有的所有 Kitty 的 Index
