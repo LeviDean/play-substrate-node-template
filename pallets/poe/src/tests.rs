@@ -1,16 +1,13 @@
 use super::*;
 use crate::{mock::*, Error};
-use frame_support::{assert_noop, assert_ok, BoundedVec};
 use frame_support::pallet_prelude::Get;
+use frame_support::{assert_noop, assert_ok, BoundedVec};
 
 #[test]
 fn get_length() {
 	// create claim OK
 	new_test_ext().execute_with(|| {
-		assert_eq!(
-			<<Test as Config>::MaxClaimLength as Get<u32>>::get(),
-			512
-		);
+		assert_eq!(<<Test as Config>::MaxClaimLength as Get<u32>>::get(), 512);
 	})
 }
 
@@ -21,7 +18,8 @@ fn create_claim_works() {
 		let claim = vec![0, 1];
 		assert_ok!(PoeModule::create_claim(Origin::signed(1), claim.clone()));
 
-		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+		let bounded_claim =
+			BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
 
 		assert_eq!(
 			Proofs::<Test>::get(&bounded_claim),
@@ -39,7 +37,6 @@ fn create_claim_failed_when_claim_too_long() {
 			PoeModule::create_claim(Origin::signed(1), claim.clone()),
 			Error::<Test>::ClaimTooLong
 		);
-
 	})
 }
 
@@ -54,7 +51,6 @@ fn create_claim_failed_when_claim_already_exist() {
 			PoeModule::create_claim(Origin::signed(1), claim.clone()),
 			Error::<Test>::ProofAlreadyExist
 		);
-
 	})
 }
 
@@ -65,17 +61,14 @@ fn revoke_claim_works() {
 		let claim = vec![0, 1];
 		let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
 
-		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+		let bounded_claim =
+			BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
 
 		assert_ok!(PoeModule::revoke_claim(Origin::signed(1), claim.clone()));
-		
-		assert_eq!(
-			Proofs::<Test>::get(&bounded_claim),
-			None
-		);
+
+		assert_eq!(Proofs::<Test>::get(&bounded_claim), None);
 	})
 }
-
 
 #[test]
 fn revoke_claim_failed_when_claim_not_exist() {
@@ -87,10 +80,8 @@ fn revoke_claim_failed_when_claim_not_exist() {
 			PoeModule::revoke_claim(Origin::signed(1), claim.clone()),
 			Error::<Test>::ClaimNotExist
 		);
-		
 	})
 }
-
 
 #[test]
 fn revoke_claim_failed_when_not_claim_owner() {
@@ -103,10 +94,8 @@ fn revoke_claim_failed_when_not_claim_owner() {
 			PoeModule::revoke_claim(Origin::signed(2), claim.clone()),
 			Error::<Test>::NotClaimOwner
 		);
-		
 	})
 }
-
 
 #[test]
 fn transfer_claim_works() {
@@ -115,7 +104,8 @@ fn transfer_claim_works() {
 		let claim = vec![0, 1];
 		let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
 
-		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+		let bounded_claim =
+			BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
 
 		assert_eq!(
 			Proofs::<Test>::get(&bounded_claim),
@@ -138,7 +128,8 @@ fn transfer_claim_failed_when_not_claim_owner() {
 		let claim = vec![0, 1];
 		let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
 
-		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+		let bounded_claim =
+			BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
 
 		assert_eq!(
 			Proofs::<Test>::get(&bounded_claim),
@@ -149,7 +140,6 @@ fn transfer_claim_failed_when_not_claim_owner() {
 			PoeModule::transfer_claim(Origin::signed(2), 3, claim.clone()),
 			Error::<Test>::NotClaimOwner
 		);
-
 	})
 }
 
@@ -160,13 +150,13 @@ fn transfer_claim_failed_when_claim_not_exist() {
 		let claim = vec![0, 1];
 		let _ = PoeModule::create_claim(Origin::signed(1), claim.clone());
 
-		let bounded_claim = BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
+		let bounded_claim =
+			BoundedVec::<u8, <Test as Config>::MaxClaimLength>::try_from(claim.clone()).unwrap();
 
 		assert_eq!(
 			Proofs::<Test>::get(&bounded_claim),
 			Some((1, frame_system::Pallet::<Test>::block_number()))
 		);
-
 
 		let claim2 = vec![0, 2];
 
@@ -174,7 +164,5 @@ fn transfer_claim_failed_when_claim_not_exist() {
 			PoeModule::transfer_claim(Origin::signed(2), 3, claim2.clone()),
 			Error::<Test>::ClaimNotExist
 		);
-
 	})
 }
-
