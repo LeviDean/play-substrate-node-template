@@ -13,10 +13,10 @@ pub mod pallet {
 
 	// type KittyIndex = u32;
 
-	// #[pallet::type_value]
-	// pub fn GetDefaultValue() -> KittyIndex {
-	// 	0_u32
-	// }
+	#[pallet::type_value]
+	pub fn GetDefaultValue<T: Config>() -> T::KittyIndex {
+		0_u8.into()
+	}
 
 	#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, TypeInfo, MaxEncodedLen)]
 	pub struct Kitty(pub [u8; 16]);
@@ -40,9 +40,12 @@ pub mod pallet {
 			+ MaxEncodedLen
 			+ TypeInfo
 			+ Bounded;
+		
+		#[pallet::constant]	
 		type MaxKittiesOwned: Get<u32>;
 
 		// ! Need reserve tokens
+		#[pallet::constant]
 		type KittyReserve: Get<BalanceOf<Self>>;
 		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 	}
@@ -53,7 +56,7 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn next_kitty_id)]
-	pub type NextKitty<T: Config> = StorageValue<_, T::KittyIndex, ValueQuery>;
+	pub type NextKitty<T: Config> = StorageValue<_, T::KittyIndex, ValueQuery, GetDefaultValue<T>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn kitties)]
