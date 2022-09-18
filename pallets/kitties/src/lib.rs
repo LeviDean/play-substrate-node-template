@@ -1,17 +1,26 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+/// Edit this file to define custom logic or remove it if it is not needed.
+/// Learn more about FRAME and the core library of Substrate FRAME pallets:
+/// <https://docs.substrate.io/v3/runtime/frame>
 pub use pallet::*;
+
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::dispatch::{fmt::Debug, Codec};
-	use frame_support::pallet_prelude::*;
-	use frame_support::traits::{Currency, Randomness, ReservableCurrency};
+	use frame_support::traits::{Randomness, ReservableCurrency};
+	use frame_support::{pallet_prelude::*, traits::Currency};
 	use frame_system::pallet_prelude::*;
-	use sp_io::hashing::blake2_128;
-	use sp_runtime::traits::{AtLeast32BitUnsigned, Bounded, One};
+	use sp_runtime::traits::{AtLeast32Bit, Bounded, CheckedAdd};
 
-	// type KittyIndex = u32;
+	type BalanceOf<T> =
+		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 	#[pallet::type_value]
 	pub fn GetDefaultValue<T: Config>() -> T::KittyIndex {
@@ -21,33 +30,20 @@ pub mod pallet {
 	#[derive(Encode, Decode, Clone, PartialEq, Eq, Debug, TypeInfo, MaxEncodedLen)]
 	pub struct Kitty(pub [u8; 16]);
 
-	type BalanceOf<T> =
-		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
-
+	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
+		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		type Randomness: Randomness<Self::Hash, Self::BlockNumber>;
-		// ! Inject KittyIndex from the Runtime
-		type KittyIndex: Parameter
-			+ Member
-			+ AtLeast32BitUnsigned
-			+ Codec
-			+ Default
-			+ Copy
-			+ MaybeSerializeDeserialize
-			+ Debug
-			+ MaxEncodedLen
-			+ TypeInfo
-			+ Bounded;
-		
-		#[pallet::constant]	
-		type MaxKittiesOwned: Get<u32>;
+		type Currency: ReservableCurrency<Self::AccountId>;
+		type KittyIndex: AtLeast32Bit + Copy + Parameter + Default + Bounded + MaxEncodedLen;
 
-		// ! Need reserve tokens
 		#[pallet::constant]
-		type KittyReserve: Get<BalanceOf<Self>>;
-		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
+		type MaxKittyIndex: Get<u32>;
+
+		#[pallet::constant]
+		type KittyPrice: Get<BalanceOf<Self>>;
 	}
 
 	#[pallet::pallet]
@@ -56,7 +52,8 @@ pub mod pallet {
 
 	#[pallet::storage]
 	#[pallet::getter(fn next_kitty_id)]
-	pub type NextKitty<T: Config> = StorageValue<_, T::KittyIndex, ValueQuery, GetDefaultValue<T>>;
+	pub type NextKittyId<T: Config> =
+		StorageValue<_, T::KittyIndex, ValueQuery, GetDefaultValue<T>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn kitties)]
@@ -67,61 +64,74 @@ pub mod pallet {
 	pub type KittyOwner<T: Config> = StorageMap<_, Blake2_128Concat, T::KittyIndex, T::AccountId>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn owner_kitties)]
-	// ! key:owner value:[KittyIndex]
-	pub type OwnerKitties<T: Config> = StorageMap<
+	#[pallet::getter(fn all_kitties)]
+	pub type AllKitties<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
-		BoundedVec<T::KittyIndex, T::MaxKittiesOwned>,
+		BoundedVec<T::KittyIndex, T::MaxKittyIndex>,
 		ValueQuery,
 	>;
 
+	// Pallets use events to inform users when important changes are made.
+	// https://docs.substrate.io/v3/runtime/events-and-errors
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
 		KittyCreated(T::AccountId, T::KittyIndex, Kitty),
-		KittyBred(T::AccountId, T::KittyIndex, Kitty),
 		KittyTransferred(T::AccountId, T::AccountId, T::KittyIndex),
 	}
 
+	// Errors inform users that something went wrong.
 	#[pallet::error]
 	pub enum Error<T> {
 		InvalidKittyId,
+		KittyIdOverflow,
 		SameKittyId,
 		NotOwner,
-		KittiesIndexError,
-		TooManyKitties,
-		// ---------
-		TokenNotEnough,
+		NotEnoughBalance,
+		OwnTooManyKitties,
 	}
 
+	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
+	// These functions materialize as "extrinsics", which are often compared to transactions.
+	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		#[pallet::weight(10_000)]
+		#[frame_support::transactional]
 		pub fn create(origin: OriginFor<T>) -> DispatchResult {
 			let who = ensure_signed(origin)?;
-			let kitty_id = Self::get_next_id().map_err(|_| Error::<T>::InvalidKittyId)?;
 
-			// ! reserve tokens
-			T::Currency::reserve(&who, T::KittyReserve::get())
-				.map_err(|_| Error::<T>::TokenNotEnough)?;
+			let kitty_price = T::KittyPrice::get();
+			ensure!(T::Currency::can_reserve(&who, kitty_price), Error::<T>::NotEnoughBalance);
+
+			let kitty_id = Self::get_next_id().map_err(|_| Error::<T>::InvalidKittyId)?;
 
 			let dna = Self::random_value(&who);
 			let kitty = Kitty(dna);
 
+			T::Currency::reserve(&who, kitty_price)?;
 			Kitties::<T>::insert(kitty_id, &kitty);
 			KittyOwner::<T>::insert(kitty_id, &who);
-			NextKitty::<T>::set(kitty_id + One::one());
+			let next_kitty_id = kitty_id
+				.checked_add(&(T::KittyIndex::from(1_u8)))
+				.ok_or(Error::<T>::KittyIdOverflow)
+				.unwrap();
+			NextKittyId::<T>::set(next_kitty_id);
 
-			OwnerKitties::<T>::try_mutate(&who, |kitties| kitties.try_push(kitty_id.clone()))
-				.map_err(|_| Error::<T>::TooManyKitties)?;
+			AllKitties::<T>::try_mutate(&who, |ref mut kitties| {
+				kitties.try_push(kitty_id).map_err(|_| Error::<T>::OwnTooManyKitties)?;
+				Ok::<(), DispatchError>(())
+			})?;
 
 			Self::deposit_event(Event::KittyCreated(who, kitty_id, kitty));
+
 			Ok(())
 		}
 
 		#[pallet::weight(10_000)]
+		#[frame_support::transactional]
 		pub fn breed(
 			origin: OriginFor<T>,
 			kitty_id_1: T::KittyIndex,
@@ -129,40 +139,44 @@ pub mod pallet {
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			T::Currency::reserve(&who, T::KittyReserve::get())
-				.map_err(|_| Error::<T>::TokenNotEnough)?;
+			let kitty_price = T::KittyPrice::get();
+			ensure!(T::Currency::can_reserve(&who, kitty_price), Error::<T>::NotEnoughBalance);
 
-			// check kitty id
 			ensure!(kitty_id_1 != kitty_id_2, Error::<T>::SameKittyId);
 			let kitty_1 = Self::get_kitty(kitty_id_1).map_err(|_| Error::<T>::InvalidKittyId)?;
 			let kitty_2 = Self::get_kitty(kitty_id_2).map_err(|_| Error::<T>::InvalidKittyId)?;
 
-			// get next id
 			let kitty_id = Self::get_next_id().map_err(|_| Error::<T>::InvalidKittyId)?;
 
-			// selector for breeding
-			let select = Self::random_value(&who);
+			let selector = Self::random_value(&who);
 
 			let mut data = [0u8; 16];
 			for i in 0..kitty_1.0.len() {
-				// 0 choose kitty_1, and 1 choose kitty_2
-				data[i] = (kitty_1.0[i] & select[i]) | (kitty_2.0[i] & !select[i]);
+				data[i] = (kitty_1.0[i] & selector[i]) | (kitty_2.0[i] & !selector[i]);
 			}
-
 			let new_kitty = Kitty(data);
 
+			T::Currency::reserve(&who, kitty_price)?;
 			Kitties::<T>::insert(kitty_id, &new_kitty);
 			KittyOwner::<T>::insert(kitty_id, &who);
-			NextKitty::<T>::set(kitty_id + One::one());
+			let next_kitty_id = kitty_id
+				.checked_add(&(T::KittyIndex::from(1_u8)))
+				.ok_or(Error::<T>::KittyIdOverflow)
+				.unwrap();
+			NextKittyId::<T>::set(next_kitty_id);
 
-			OwnerKitties::<T>::try_mutate(&who, |kitties| kitties.try_push(kitty_id.clone()))
-				.map_err(|_| Error::<T>::TooManyKitties)?;
+			AllKitties::<T>::try_mutate(&who, |ref mut kitties| {
+				kitties.try_push(kitty_id).map_err(|_| Error::<T>::OwnTooManyKitties)?;
+				Ok::<(), DispatchError>(())
+			})?;
 
-			Self::deposit_event(Event::KittyBred(who, kitty_id, new_kitty));
+			Self::deposit_event(Event::KittyCreated(who, kitty_id, new_kitty));
+
 			Ok(())
 		}
 
 		#[pallet::weight(10_000)]
+		#[frame_support::transactional]
 		pub fn transfer(
 			origin: OriginFor<T>,
 			kitty_id: T::KittyIndex,
@@ -170,31 +184,29 @@ pub mod pallet {
 		) -> DispatchResult {
 			let who = ensure_signed(origin)?;
 
-			let _target_kitty =
-				Self::get_kitty(kitty_id).map_err(|_| Error::<T>::InvalidKittyId)?;
+			let kitty_price = T::KittyPrice::get();
+			ensure!(
+				T::Currency::can_reserve(&new_owner, kitty_price),
+				Error::<T>::NotEnoughBalance
+			);
+
+			Self::get_kitty(kitty_id).map_err(|_| Error::<T>::InvalidKittyId)?;
 
 			ensure!(Self::kitty_owner(kitty_id) == Some(who.clone()), Error::<T>::NotOwner);
 
-			OwnerKitties::<T>::try_mutate(&who, |owned| {
-				if let Some(index) = owned.iter().position(|kitty| kitty == &kitty_id) {
-					owned.swap_remove(index);
-					return Ok(());
-				}
-				Err(())
-			})
-			.map_err(|_| <Error<T>>::NotOwner)?;
+			T::Currency::unreserve(&who, kitty_price);
+			T::Currency::reserve(&new_owner, kitty_price)?;
+			KittyOwner::<T>::insert(kitty_id, &new_owner);
 
-			// unreserve old
-			T::Currency::unreserve(&who, T::KittyReserve::get());
-
-			// reserve new
-			T::Currency::reserve(&new_owner, T::KittyReserve::get())
-				.map_err(|_| Error::<T>::TokenNotEnough)?;
-
-			KittyOwner::<T>::insert(kitty_id, new_owner.clone());
-
-			OwnerKitties::<T>::try_mutate(&new_owner, |kitties| kitties.try_push(kitty_id.clone()))
-				.map_err(|_| Error::<T>::TooManyKitties)?;
+			AllKitties::<T>::try_mutate(&who, |ref mut kitties| {
+				let index = kitties.iter().position(|&r| r == kitty_id).unwrap();
+				kitties.remove(index);
+				Ok::<(), DispatchError>(())
+			})?;
+			AllKitties::<T>::try_mutate(&new_owner, |ref mut kitties| {
+				kitties.try_push(kitty_id).map_err(|_| Error::<T>::OwnTooManyKitties)?;
+				Ok::<(), DispatchError>(())
+			})?;
 
 			Self::deposit_event(Event::KittyTransferred(who, new_owner, kitty_id));
 
@@ -203,7 +215,6 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		// get a random 256
 		fn random_value(sender: &T::AccountId) -> [u8; 16] {
 			let payload = (
 				T::Randomness::random_seed(),
@@ -211,18 +222,17 @@ pub mod pallet {
 				<frame_system::Pallet<T>>::extrinsic_index(),
 			);
 
-			payload.using_encoded(blake2_128) // ! [u8; 16] ?
+			payload.using_encoded(sp_io::hashing::blake2_128)
 		}
 
-		fn get_next_id() -> Result<T::KittyIndex, DispatchError> {
+		fn get_next_id() -> Result<T::KittyIndex, ()> {
 			let kitty_id = Self::next_kitty_id();
-			if kitty_id == T::KittyIndex::max_value() {
-				return Err(Error::<T>::KittiesIndexError.into());
+			match kitty_id {
+				_ if T::KittyIndex::max_value() <= kitty_id => Err(()),
+				val => Ok(val),
 			}
-			Ok(kitty_id)
 		}
 
-		// get kitty via id
 		fn get_kitty(kitty_id: T::KittyIndex) -> Result<Kitty, ()> {
 			match Self::kitties(kitty_id) {
 				Some(kitty) => Ok(kitty),

@@ -275,13 +275,22 @@ impl pallet_poe::Config for Runtime {
 }
 
 /// Configure the Kitties pallet
+// impl pallet_kitties::Config for Runtime {
+// 	type Event = Event;
+// 	type Randomness = RandomnessCollectiveFlip;
+// 	type KittyIndex = u32;
+// 	type MaxKittiesOwned = ConstU32<32>;
+// 	type KittyReserve = KittyReserve;
+// 	type Currency = Balances;
+// }
+
 impl pallet_kitties::Config for Runtime {
 	type Event = Event;
 	type Randomness = RandomnessCollectiveFlip;
-	type KittyIndex = u32;
-	type MaxKittiesOwned = ConstU32<32>;
-	type KittyReserve = KittyReserve;
 	type Currency = Balances;
+	type KittyIndex = u32;
+	type MaxKittyIndex = ConstU32<512>;
+	type KittyPrice = ConstU128<512>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
