@@ -311,7 +311,7 @@ construct_runtime!(
 		// Include the custom logic from the pallet-template in the runtime.
 		TemplateModule: pallet_template,
 		PoeModule: pallet_poe,
-		Kitties: pallet_kitties,
+		KittiesModule: pallet_kitties,
 	}
 );
 
