@@ -2,7 +2,11 @@
 ![](./img/test.jpg)
 
 # UI 执行界面
+## 创建小猫
 ![](./img/front.jpg)
+## 转让小猫
+![](./img/front2.jpg)
+![](./img/front3.jpg)
 
 # 0. 代码执行
 ![](./img/run.jpg)
