@@ -24,7 +24,7 @@ use serde::{Deserialize, Deserializer};
 
 use frame_system::{
     offchain::{
-        AppCrypto, CreateSignedTransaction, SendSignedTransaction,
+        AppCrypto, CreateSignedTransaction, SendSignedTransaction, SubmitTransaction,
         Signer,
     },
 };
@@ -58,6 +58,9 @@ pub mod crypto {
         }
 }
 
+
+const ONCHAIN_TX_KEY: &[u8] = b"ocw::storage::tx";
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
@@ -68,7 +71,8 @@ pub mod pallet {
 		pallet_prelude::*,
 		sp_runtime::offchain::storage::{StorageRetrievalError, StorageValueRef},
 	};
-	use frame_system::pallet_prelude::*;
+	use frame_system::{pallet_prelude::*, offchain::SendTransactionTypes};
+	use sp_io::offchain_index;
 
 	#[derive(Deserialize, Encode, Decode)]
 	struct GithubInfo {
@@ -92,6 +96,10 @@ pub mod pallet {
         }
     }
 
+	#[derive(Debug, Deserialize, Encode, Decode, Default)]
+	struct IndexingData(Vec<u8>, u64);
+	
+
 	pub fn de_string_to_bytes<'de, D>(de: D) -> Result<Vec<u8>, D::Error>
 	where
 	D: Deserializer<'de>,
@@ -102,7 +110,7 @@ pub mod pallet {
 
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config + CreateSignedTransaction<Call<Self>> {
+	pub trait Config: frame_system::Config + CreateSignedTransaction<Call<Self>> + SendTransactionTypes<Call<Self>>{
 		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
 		type AuthorityId: AppCrypto<Self::Public, Self::Signature>;
 	}
@@ -174,6 +182,22 @@ pub mod pallet {
             Ok(().into())
         }
 
+		#[pallet::weight(0)]
+		pub fn submit_data_unsigned(origin: OriginFor<T>, n: u64) -> DispatchResult {
+			ensure_none(origin)?;
+
+            
+			// let key = Self::derive_key(frame_system::Module::<T>::block_number());
+			// let key = b"test_key".to_vec();
+			let key = b"testKey".to_vec();
+			let data = IndexingData(b"submit_number_unsigned".to_vec(), n);
+			offchain_index::set(&key, &data.encode());
+			log::info!("in submit_data_unsigned, value: {:?}", n);
+
+			// Return a successful DispatchResultWithPostInfo
+			Ok(())
+		}
+
 	}
 
 	#[pallet::hooks]
@@ -181,17 +205,27 @@ pub mod pallet {
 		fn offchain_worker(block_number: T::BlockNumber) {
 			log::info!("Hello from offchain workers!: {:?}", block_number);
 
+			// unsigned transaction + write to offchain storage
+			let value: u64 = 42;
+
+            let call = Call::submit_data_unsigned { n: value };
+
+            _ = SubmitTransaction::<T, Call<T>>::submit_unsigned_transaction(call.into())
+                .map_err(|_| {
+                    log::error!("Failed in offchain_unsigned_tx");
+                });
+
 			// transaction
-			let payload: Vec<u8> = vec![1,2,3,4,5,6,7,8];
-            _ = Self::send_signed_tx(payload);
+			// let payload: Vec<u8> = vec![1,2,3,4,5,6,7,8];
+            // _ = Self::send_signed_tx(payload);
 			
 
 			// offchain http
-			if let Ok(info) = Self::fetch_github_info() {
-                log::info!("Github Info: {:?}", info);
-            } else {
-                log::info!("Error while fetch github info!");
-            }
+			// if let Ok(info) = Self::fetch_github_info() {
+            //     log::info!("Github Info: {:?}", info);
+            // } else {
+            //     log::info!("Error while fetch github info!");
+            // }
 			
 			// offchain storage
 			if block_number % 2u32.into() != Zero::zero() {
@@ -249,14 +283,15 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		#[deny(clippy::clone_double_ref)]
+
+		// #[deny(clippy::clone_double_ref)]
 		fn derive_key(block_number: T::BlockNumber) -> Vec<u8> {
 			block_number.using_encoded(|encoded_bn| {
-				b"node-template::storage::"
-					.iter()
-					.chain(encoded_bn)
-					.copied()
-					.collect::<Vec<u8>>()
+			  ONCHAIN_TX_KEY.clone().into_iter()
+				.chain(b"/".into_iter())
+				.chain(encoded_bn)
+				.copied()
+				.collect::<Vec<u8>>()
 			})
 		}
 
@@ -311,4 +346,23 @@ pub mod pallet {
 
 
 	}
+
+	#[pallet::validate_unsigned]
+    impl<T: Config> ValidateUnsigned for Pallet<T> {
+        type Call = Call<T>;
+
+        fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+            if let Call::submit_data_unsigned { n: _ } = call {
+                //let provide = b"submit_xxx_unsigned".to_vec();
+                ValidTransaction::with_tag_prefix("ExampleOffchainWorker")
+                    .priority(10000)
+                    .and_provides(1)
+                    .longevity(3)
+                    .propagate(true)
+                    .build()
+            } else {
+                InvalidTransaction::Call.into()
+            }
+        }
+    }
 }
